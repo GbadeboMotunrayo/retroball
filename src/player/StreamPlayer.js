@@ -1,0 +1,101 @@
+import React, { useCallback, useMemo, useRef } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { WebView } from 'react-native-webview';
+import { INJECTED_JS } from './injected';
+import { palette } from '../theme/palette';
+
+function hostOf(url) {
+  try {
+    return new URL(url).host.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Chromeless WebView playback (PRD §4). The stream is the source site's own,
+ * at the source site's quality — no re-encoding here.
+ *
+ * `onStatus` reports one of: 'loading' | 'playing' | 'buffering' | 'error'.
+ */
+export default function StreamPlayer({ url, muted = false, onStatus }) {
+  const ref = useRef(null);
+  const origin = useMemo(() => hostOf(url), [url]);
+
+  // Ad frames routinely try to navigate the top window to a different domain.
+  // Anything leaving the origin the user actually asked for is refused —
+  // otherwise the TV silently ends up showing a casino landing page.
+  const onShouldStartLoadWithRequest = useCallback(
+    (req) => {
+      if (!req.url || req.url === 'about:blank') return true;
+      if (req.url.startsWith('about:') || req.url.startsWith('data:')) return true;
+      // Sub-frame loads are the stream's own machinery; only gate top-level nav.
+      if (!req.isTopFrame) return true;
+      const target = hostOf(req.url);
+      return target === origin;
+    },
+    [origin]
+  );
+
+  const onMessage = useCallback(
+    (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.nativeEvent.data);
+      } catch {
+        return;
+      }
+      if (msg.type === 'playing') onStatus?.('playing');
+      else if (msg.type === 'buffering') onStatus?.('buffering');
+      else if (msg.type === 'video-error' || msg.type === 'no-video') onStatus?.('error');
+    },
+    [onStatus]
+  );
+
+  if (!url) return <View style={styles.blank} />;
+
+  return (
+    <View style={styles.root}>
+      <WebView
+        ref={ref}
+        source={{ uri: url }}
+        style={styles.web}
+        containerStyle={styles.web}
+        // Keep the picture inside the bezel — the single most important prop
+        // here. Native fullscreen would throw the video out of the TV frame.
+        allowsInlineMediaPlayback
+        allowsFullscreenVideo={false}
+        mediaPlaybackRequiresUserAction={false}
+        // Popup / popunder suppression.
+        setSupportMultipleWindows={false}
+        javaScriptCanOpenWindowsAutomatically={false}
+        // Nothing that hints at a browser.
+        allowsBackForwardNavigationGestures={false}
+        showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}
+        scrollEnabled={false}
+        bounces={false}
+        overScrollMode="never"
+        originWhitelist={['*']}
+        onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
+        injectedJavaScript={INJECTED_JS}
+        onMessage={onMessage}
+        onLoadStart={() => onStatus?.('loading')}
+        onError={() => onStatus?.('error')}
+        onHttpError={() => onStatus?.('error')}
+        mediaPlaybackControlsEnabled={false}
+        // Many stream hosts serve a desktop-only player to mobile UAs.
+        userAgent={
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        }
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: palette.phosphorBlack },
+  web: { flex: 1, backgroundColor: palette.phosphorBlack },
+  blank: { flex: 1, backgroundColor: palette.phosphorBlack },
+});

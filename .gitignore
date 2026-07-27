@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Product docs — pitch/PRD stay out of the public repo
+docs/
