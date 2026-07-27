@@ -28,11 +28,28 @@ On a device (needed for anything involving the player):
 npx expo start
 ```
 
+On a phone via Expo Go (same Wi-Fi):
+
+```bash
+npx expo start --host lan
+```
+
 Regenerate the CRT snow textures after editing the generator:
 
 ```bash
 node scripts/make-noise.js
 ```
+
+## Vercel
+
+`vercel.json` builds with `expo export --platform web` into `dist/`. Import the
+repo on Vercel and it needs no further configuration.
+
+**Be clear about what the hosted site is.** It renders the TV — boot sequence,
+cabinet, dial, knob, snow, No Signal — but it **cannot play a stream**, because
+`react-native-webview` has no web implementation and the build swaps in
+`StreamPlayer.web.js`, a placard. Treat the deploy as a demo and marketing
+surface for the shell, not as the product. The product is the phone app.
 
 ## What's built
 
