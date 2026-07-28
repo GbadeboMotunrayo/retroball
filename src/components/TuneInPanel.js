@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { palette } from '../theme/palette';
@@ -6,11 +6,19 @@ import { type } from '../theme/type';
 import { normalizeUrl } from '../state/validateUrl';
 import { tick } from '../audio/sfx';
 
-// Shown on the screen area when no channel is tuned. Styled as an on-screen
-// display (the menu an old TV overlays on the picture), not as an app form.
-export default function TuneInPanel({ onTune }) {
-  const [text, setText] = useState('');
+// Shown on the screen area when no channel is tuned, and when retuning a
+// channel whose saved link has died. Styled as an on-screen display (the menu
+// an old TV overlays on the picture), not as an app form.
+export default function TuneInPanel({ channel, initialValue = '', onTune, onClear }) {
+  const [text, setText] = useState(initialValue);
   const [error, setError] = useState(null);
+
+  // Retuning a different channel must not carry the previous channel's link
+  // into the box.
+  useEffect(() => {
+    setText(initialValue);
+    setError(null);
+  }, [initialValue, channel]);
 
   const paste = async () => {
     tick();
@@ -38,7 +46,7 @@ export default function TuneInPanel({ onTune }) {
 
   return (
     <View style={styles.root}>
-      <Text style={styles.osd}>TUNE IN</Text>
+      <Text style={styles.osd}>{channel ? `TUNE CHANNEL ${channel}` : 'TUNE IN'}</Text>
 
       <View style={styles.inputRow}>
         <TextInput
@@ -63,13 +71,30 @@ export default function TuneInPanel({ onTune }) {
         </Pressable>
       </View>
 
-      <Pressable
-        onPress={submit}
-        style={({ pressed }) => [styles.tuneBtn, pressed && styles.tuneBtnPressed]}
-        accessibilityRole="button"
-      >
-        <Text style={styles.tuneLabel}>TUNE IN</Text>
-      </Pressable>
+      <View style={styles.actions}>
+        <Pressable
+          onPress={submit}
+          style={({ pressed }) => [styles.tuneBtn, pressed && styles.tuneBtnPressed]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.tuneLabel}>TUNE IN</Text>
+        </Pressable>
+
+        {/* Only offered when there is actually a saved channel to wipe. */}
+        {onClear ? (
+          <Pressable
+            onPress={() => {
+              tick();
+              onClear();
+            }}
+            style={({ pressed }) => [styles.clearBtn, pressed && styles.tuneBtnPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Clear channel ${channel}`}
+          >
+            <Text style={styles.clearLabel}>CLEAR</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
@@ -104,13 +129,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(233,220,198,0.08)',
   },
   pasteLabel: { ...type.label, color: palette.textSecondary },
+  actions: { flexDirection: 'row', alignItems: 'center', marginTop: 16 },
   tuneBtn: {
-    marginTop: 16,
     paddingHorizontal: 30,
     paddingVertical: 11,
     backgroundColor: palette.signalAmber,
   },
   tuneBtnPressed: { opacity: 0.75 },
   tuneLabel: { ...type.label, fontSize: 11, color: palette.cabinetShadow, fontWeight: '700' },
+  clearBtn: {
+    marginLeft: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: palette.noSignalRed,
+  },
+  clearLabel: { ...type.label, fontSize: 11, color: palette.noSignalRed },
   error: { ...type.body, marginTop: 14, color: palette.noSignalRed },
 });

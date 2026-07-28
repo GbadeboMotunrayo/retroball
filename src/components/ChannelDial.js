@@ -10,7 +10,7 @@ const STEP = 360 / CHANNELS.length;
 // Rotary channel selector. Tapping a detent spins the pointer to it with a
 // mechanical click — "turn the dial to Channel 3" is the core interaction the
 // product is named after, so it gets real physics rather than a tab bar.
-export default function ChannelDial({ size = 132, channel, presets = {}, onSelect }) {
+export default function ChannelDial({ size = 132, channel, presets = {}, onSelect, onRetune }) {
   const angle = useRef(new Animated.Value(((channel || 1) - 1) * STEP)).current;
 
   useEffect(() => {
@@ -42,9 +42,20 @@ export default function ChannelDial({ size = 132, channel, presets = {}, onSelec
               tick();
               onSelect?.(n);
             }}
+            // Long-press is the shortcut for replacing a saved channel's link
+            // without having to sit through its No Signal screen first.
+            onLongPress={
+              saved
+                ? () => {
+                    tick();
+                    onRetune?.(n);
+                  }
+                : undefined
+            }
             hitSlop={6}
             accessibilityRole="button"
             accessibilityLabel={`Channel ${n}${saved ? ', saved' : ', empty'}`}
+            accessibilityHint={saved ? 'Long press to retune or clear' : undefined}
             accessibilityState={{ selected: active }}
             style={[
               styles.detent,

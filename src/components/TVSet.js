@@ -29,6 +29,12 @@ import { startHum, startStatic, stopHum, stopStatic, thunk, tick } from '../audi
 // tuning, short enough that it never feels like a loading spinner in disguise.
 const TUNING_MS = 900;
 
+// A page can load without ever playing — a silent refusal to embed, a stream
+// that never starts. Without this the user stares at black forever. Set
+// generously: the target audience is on African mobile networks, and a false
+// "No Signal" on a link that would have worked is the worse failure.
+const WATCHDOG_MS = 15000;
+
 const MODE = {
   OFF: 'off',
   BOOTING: 'booting',
@@ -48,16 +54,25 @@ export default function TVSet() {
   const [url, setUrl] = useState(null);
   const [volume, setVolume] = useState(0.7);
   const [failure, setFailure] = useState(null);
-  const { presets, ready, save } = usePresets();
+  const { presets, ready, save, clear } = usePresets();
+
+  const [retuning, setRetuning] = useState(false);
 
   const restored = useRef(false);
   const tuningTimer = useRef(null);
+  const watchdogTimer = useRef(null);
   const snap = useRef(new Animated.Value(0)).current;
 
   // Nobody wants the screen dimming at 1-1 in the 80th minute.
   useKeepAwake();
 
-  useEffect(() => () => clearTimeout(tuningTimer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(tuningTimer.current);
+      clearTimeout(watchdogTimer.current);
+    },
+    []
+  );
 
   // Ambient audio follows the mode. Hum under everything that isn't playing,
   // snow hiss under tuning and No Signal.
@@ -80,7 +95,9 @@ export default function TVSet() {
   const tuneTo = useCallback(
     (nextUrl) => {
       clearTimeout(tuningTimer.current);
+      clearTimeout(watchdogTimer.current);
       setFailure(null);
+      setRetuning(false);
       setUrl(nextUrl);
       setMode(MODE.TUNING);
       snap.setValue(0);
@@ -90,6 +107,12 @@ export default function TVSet() {
       tuningTimer.current = setTimeout(() => {
         setMode((m) => (m === MODE.TUNING ? MODE.PLAYING : m));
       }, TUNING_MS);
+
+      // Cancelled as soon as the player reports a video (see onStatus).
+      watchdogTimer.current = setTimeout(() => {
+        setFailure("This link didn't start playing. It may be dead, or it may block playback here.");
+        setMode(MODE.NO_SIGNAL);
+      }, WATCHDOG_MS);
     },
     [snap]
   );
@@ -120,9 +143,11 @@ export default function TVSet() {
   const onSelectChannel = useCallback(
     (n) => {
       setChannel(n);
+      setRetuning(false);
       const preset = presets[n];
       if (preset?.url) tuneTo(preset.url);
       else {
+        clearTimeout(watchdogTimer.current);
         setUrl(null);
         setFailure(null);
         setMode(MODE.IDLE);
@@ -133,10 +158,42 @@ export default function TVSet() {
 
   const onStatus = useCallback((status) => {
     if (status === 'error') {
+      clearTimeout(watchdogTimer.current);
       setFailure('The channel went off air, or the link has expired.');
       setMode(MODE.NO_SIGNAL);
+      return;
+    }
+    // Any of these means the page embedded and produced a video, so however
+    // slow it is from here, it is not a dead link.
+    if (status === 'playing' || status === 'found' || status === 'buffering') {
+      clearTimeout(watchdogTimer.current);
     }
   }, []);
+
+  // Opens the tune-in panel for a channel that already has a link saved, so a
+  // dead preset can be replaced or wiped instead of stranding the user.
+  const retune = useCallback(
+    (n) => {
+      const target = n ?? channel;
+      clearTimeout(tuningTimer.current);
+      clearTimeout(watchdogTimer.current);
+      setChannel(target);
+      setUrl(null);
+      setFailure(null);
+      setRetuning(true);
+      setMode(MODE.IDLE);
+    },
+    [channel]
+  );
+
+  const clearChannel = useCallback(() => {
+    tick();
+    clear(channel);
+    setUrl(null);
+    setFailure(null);
+    setRetuning(false);
+    setMode(MODE.IDLE);
+  }, [channel, clear]);
 
   const togglePower = useCallback(() => {
     thunk();
@@ -153,14 +210,25 @@ export default function TVSet() {
   }, [url, channel, save]);
 
   const canSave = Boolean(url) && presets[channel]?.url !== url;
-  const nowShowing = presets[channel]?.label;
+  // After a retune the channel still holds the old preset until SET is pressed,
+  // so the label must follow what is actually playing, not what is stored —
+  // otherwise the set claims to be showing a link it isn't.
+  const nowShowing = canSave ? null : presets[channel]?.label;
 
   const screenBody = useMemo(() => {
     if (mode === MODE.OFF) return <View style={styles.dead} />;
     if (mode === MODE.BOOTING) {
       return <BootSequence onComplete={() => setMode(url ? MODE.PLAYING : MODE.IDLE)} />;
     }
-    if (mode === MODE.NO_SIGNAL) return <NoSignal detail={failure} />;
+    if (mode === MODE.NO_SIGNAL) {
+      return (
+        <NoSignal
+          detail={failure}
+          channel={presets[channel]?.url ? channel : null}
+          onRetune={presets[channel]?.url ? () => retune(channel) : null}
+        />
+      );
+    }
 
     return (
       <>
@@ -171,10 +239,30 @@ export default function TVSet() {
         ) : null}
 
         {mode === MODE.TUNING ? <StaticNoise intensity={1} /> : null}
-        {mode === MODE.IDLE ? <TuneInPanel onTune={tuneTo} /> : null}
+        {mode === MODE.IDLE ? (
+          <TuneInPanel
+            channel={retuning ? channel : null}
+            initialValue={retuning ? (presets[channel]?.url ?? '') : ''}
+            onTune={tuneTo}
+            onClear={retuning && presets[channel]?.url ? clearChannel : null}
+          />
+        ) : null}
       </>
     );
-  }, [mode, url, failure, snap, volume, onStatus, tuneTo]);
+  }, [
+    mode,
+    url,
+    failure,
+    snap,
+    volume,
+    onStatus,
+    tuneTo,
+    retuning,
+    channel,
+    presets,
+    retune,
+    clearChannel,
+  ]);
 
   if (!isLandscape) return <RotateNudge />;
 
@@ -198,7 +286,13 @@ export default function TVSet() {
         <View style={styles.controls}>
           <Text style={styles.brand}>RetroBall</Text>
 
-          <ChannelDial channel={channel} presets={presets} onSelect={onSelectChannel} size={124} />
+          <ChannelDial
+            channel={channel}
+            presets={presets}
+            onSelect={onSelectChannel}
+            onRetune={retune}
+            size={124}
+          />
 
           <Text style={styles.nowShowing} numberOfLines={1}>
             {mode === MODE.OFF

@@ -1,19 +1,40 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import StaticNoise from './StaticNoise';
 import { palette } from '../theme/palette';
 import { type } from '../theme/type';
+import { tick } from '../audio/sfx';
 
 // PRD §5.2: a broken or expired link must never surface a raw browser error.
 // It surfaces as this — snow, a soft hum, and a broadcast-style caption.
-export default function NoSignal({ detail }) {
+//
+// Free stream links expire constantly, so this screen is also the recovery
+// point: without a way out of here, a saved channel whose link dies becomes
+// permanently unusable. The retune control is the way out.
+export default function NoSignal({ detail, channel, onRetune }) {
   return (
     <View style={styles.root}>
       <StaticNoise intensity={0.9} />
 
-      <View style={styles.caption} pointerEvents="none">
+      <View style={styles.caption}>
         <Text style={styles.headline}>NO SIGNAL</Text>
         {detail ? <Text style={styles.detail}>{detail}</Text> : null}
+
+        {onRetune ? (
+          <Pressable
+            onPress={() => {
+              tick();
+              onRetune();
+            }}
+            style={({ pressed }) => [styles.retune, pressed && styles.retunePressed]}
+            accessibilityRole="button"
+            accessibilityLabel={channel ? `Retune channel ${channel}` : 'Retune'}
+          >
+            <Text style={styles.retuneLabel}>
+              {channel ? `RETUNE CHANNEL ${channel}` : 'RETUNE'}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -30,7 +51,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 22,
     paddingVertical: 14,
-    backgroundColor: 'rgba(17,18,20,0.72)',
+    backgroundColor: 'rgba(17,18,20,0.82)',
     borderWidth: 1,
     borderColor: palette.noSignalRed,
   },
@@ -46,4 +67,12 @@ const styles = StyleSheet.create({
     color: palette.textSecondary,
     textAlign: 'center',
   },
+  retune: {
+    marginTop: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+    backgroundColor: palette.signalAmber,
+  },
+  retunePressed: { opacity: 0.75 },
+  retuneLabel: { ...type.label, fontSize: 10, color: palette.cabinetShadow, fontWeight: '700' },
 });

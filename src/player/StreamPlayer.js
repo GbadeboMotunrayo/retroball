@@ -47,6 +47,10 @@ export default function StreamPlayer({ url, muted = false, onStatus }) {
       }
       if (msg.type === 'playing') onStatus?.('playing');
       else if (msg.type === 'buffering') onStatus?.('buffering');
+      // 'found' is the signal that embedding actually worked, even if the
+      // stream is still spinning up. The watchdog upstream needs to know the
+      // difference between "slow" and "this site will never play here".
+      else if (msg.type === 'video-found') onStatus?.('found');
       else if (msg.type === 'video-error' || msg.type === 'no-video') onStatus?.('error');
     },
     [onStatus]
