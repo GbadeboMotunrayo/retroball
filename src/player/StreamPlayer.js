@@ -4,6 +4,12 @@ import { WebView } from 'react-native-webview';
 import { INJECTED_JS } from './injected';
 import { palette } from '../theme/palette';
 
+// Device-side diagnostics surface in the Metro terminal, which is the only
+// window into what a real stream site does inside the WebView. Dev only.
+function diag(...args) {
+  if (__DEV__) console.log('[RB player]', ...args);
+}
+
 function hostOf(url) {
   try {
     return new URL(url).host.replace(/^www\./, '');
@@ -32,7 +38,11 @@ export default function StreamPlayer({ url, muted = false, onStatus }) {
       // Sub-frame loads are the stream's own machinery; only gate top-level nav.
       if (!req.isTopFrame) return true;
       const target = hostOf(req.url);
-      return target === origin;
+      const allowed = target === origin;
+      // A site that fights this will show up here as a burst of blocked
+      // hosts — the signature of an ad redirect chain.
+      if (!allowed) diag('blocked top-level nav →', target);
+      return allowed;
     },
     [origin]
   );
@@ -45,6 +55,9 @@ export default function StreamPlayer({ url, muted = false, onStatus }) {
       } catch {
         return;
       }
+      diag(msg.type, msg.payload ?? '');
+
+      if (msg.type === 'diag') return; // reporting only
       if (msg.type === 'playing') onStatus?.('playing');
       else if (msg.type === 'buffering') onStatus?.('buffering');
       // 'found' is the signal that embedding actually worked, even if the
@@ -84,9 +97,20 @@ export default function StreamPlayer({ url, muted = false, onStatus }) {
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         injectedJavaScript={INJECTED_JS}
         onMessage={onMessage}
-        onLoadStart={() => onStatus?.('loading')}
-        onError={() => onStatus?.('error')}
-        onHttpError={() => onStatus?.('error')}
+        onLoadStart={() => {
+          diag('load start', url);
+          onStatus?.('loading');
+        }}
+        onLoadEnd={() => diag('load end')}
+        onError={(e) => {
+          diag('webview error', e.nativeEvent?.description ?? e.nativeEvent);
+          onStatus?.('error');
+        }}
+        onHttpError={(e) => {
+          // A 403/401 here is the classic "this site refuses to be embedded".
+          diag('http error', e.nativeEvent?.statusCode, e.nativeEvent?.url);
+          onStatus?.('error');
+        }}
         mediaPlaybackControlsEnabled={false}
         // Many stream hosts serve a desktop-only player to mobile UAs.
         userAgent={

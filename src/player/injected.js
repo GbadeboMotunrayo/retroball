@@ -77,6 +77,15 @@ export const INJECTED_JS = `
     post('video-found');
   }
 
+  // Report what the page actually looks like, so a failed spike is
+  // diagnosable from one run instead of needing a second.
+  post('diag', {
+    host: location.host,
+    title: (document.title || '').slice(0, 80),
+    iframes: document.querySelectorAll('iframe').length,
+    videos: document.querySelectorAll('video').length,
+  });
+
   // Streams are often injected well after DOMContentLoaded, so poll for a
   // while rather than checking once.
   var tries = 0;
@@ -88,7 +97,12 @@ export const INJECTED_JS = `
       clearInterval(timer);
     } else if (tries > 40) {
       clearInterval(timer);
-      post('no-video');
+      // Distinguish "no video anywhere" from "video is sealed inside a
+      // cross-origin iframe we cannot reach" — completely different fixes.
+      post('no-video', {
+        iframes: document.querySelectorAll('iframe').length,
+        videos: document.querySelectorAll('video').length,
+      });
     }
   }, 500);
 })();
